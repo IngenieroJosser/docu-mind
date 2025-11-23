@@ -59,7 +59,9 @@ const translations = {
       subtitle: "Supported formats: PDF, DOC, XLS, TXT, CSV",
       dropFiles: "Drop your files here",
       orClick: "or click to browse",
-      maxFiles: "Maximum 10 files • 100MB each"
+      maxFiles: "Maximum 10 files • 100MB each",
+      limitReached: "Maximum file limit reached (10 files)",
+      removeSome: "Remove some files to upload more"
     },
     actions: {
       startAnalysis: "Start Analysis",
@@ -106,6 +108,11 @@ const translations = {
       noResults: "No Analysis Results",
       analyzing: "Analyzing Documents...",
       aiProcessing: "Our AI is processing your documents"
+    },
+    errors: {
+      fileLimit: "Cannot upload more than 10 files",
+      fileTooLarge: "File is too large (max 100MB)",
+      invalidFormat: "File format not supported"
     }
   },
   es: {
@@ -118,7 +125,9 @@ const translations = {
       subtitle: "Formatos soportados: PDF, DOC, XLS, TXT, CSV",
       dropFiles: "Suelta tus archivos aquí",
       orClick: "o haz clic para explorar",
-      maxFiles: "Máximo 10 archivos • 100MB cada uno"
+      maxFiles: "Máximo 10 archivos • 100MB cada uno",
+      limitReached: "Límite máximo de archivos alcanzado (10 archivos)",
+      removeSome: "Elimina algunos archivos para subir más"
     },
     actions: {
       startAnalysis: "Iniciar Análisis",
@@ -165,9 +174,19 @@ const translations = {
       noResults: "Sin Resultados de Análisis",
       analyzing: "Analizando Documentos...",
       aiProcessing: "Nuestra IA está procesando tus documentos"
+    },
+    errors: {
+      fileLimit: "No se pueden subir más de 10 archivos",
+      fileTooLarge: "El archivo es demasiado grande (máx. 100MB)",
+      invalidFormat: "Formato de archivo no soportado"
     }
   }
 }
+
+// Constantes para las validaciones
+const MAX_FILES = 10
+const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB en bytes
+const SUPPORTED_FORMATS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.csv']
 
 export default function DocumentAnalyzer() {
   const [documents, setDocuments] = useState<Document[]>([])
@@ -182,9 +201,41 @@ export default function DocumentAnalyzer() {
   const [copiedTextId, setCopiedTextId] = useState<string | null>(null)
   const [customPrompt, setCustomPrompt] = useState('')
   const [showCustomPrompt, setShowCustomPrompt] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const t = translations[language]
+
+  // Función para validar archivos
+  const validateFiles = (files: File[]): { valid: File[], errors: string[] } => {
+    const validFiles: File[] = []
+    const errors: string[] = []
+
+    files.forEach(file => {
+      // Verificar límite de archivos
+      if (documents.length + validFiles.length >= MAX_FILES) {
+        errors.push(t.errors.fileLimit)
+        return
+      }
+
+      // Verificar tamaño del archivo
+      if (file.size > MAX_FILE_SIZE) {
+        errors.push(`${t.errors.fileTooLarge}: ${file.name}`)
+        return
+      }
+
+      // Verificar formato del archivo
+      const fileExtension = '.' + file.name.toLowerCase().split('.').pop()
+      if (!SUPPORTED_FORMATS.includes(fileExtension)) {
+        errors.push(`${t.errors.invalidFormat}: ${file.name}`)
+        return
+      }
+
+      validFiles.push(file)
+    })
+
+    return { valid: validFiles, errors }
+  }
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -194,6 +245,7 @@ export default function DocumentAnalyzer() {
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
+    setUploadError(null)
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -206,10 +258,25 @@ export default function DocumentAnalyzer() {
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     handleFiles(files)
+    // Reset input para permitir subir el mismo archivo otra vez
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
   }
 
   const handleFiles = (files: File[]) => {
-    const newDocuments: Document[] = files.map(file => ({
+    // Validar archivos
+    const { valid: validFiles, errors } = validateFiles(files)
+
+    // Mostrar errores si los hay
+    if (errors.length > 0) {
+      setUploadError(errors[0]) // Mostrar solo el primer error para no saturar
+      setTimeout(() => setUploadError(null), 5000)
+    }
+
+    if (validFiles.length === 0) return
+
+    const newDocuments: Document[] = validFiles.map(file => ({
       id: Math.random().toString(36).substr(2, 9),
       name: file.name,
       type: file.name.toLowerCase().includes('research') || file.name.toLowerCase().includes('study') ? 'scientific' : 'general',
@@ -220,6 +287,7 @@ export default function DocumentAnalyzer() {
     }))
 
     setDocuments(prev => [...prev, ...newDocuments])
+    setUploadError(null)
 
     // Simular progreso de upload con animación
     newDocuments.forEach((doc, index) => {
@@ -248,28 +316,55 @@ export default function DocumentAnalyzer() {
 
   const removeDocument = (id: string) => {
     setDocuments(prev => prev.filter(doc => doc.id !== id))
+    setUploadError(null)
   }
 
   const analyzeDocuments = async () => {
-    setIsAnalyzing(true)
-    setActiveTab('analysis')
+    setIsAnalyzing(true);
+    setActiveTab('analysis');
+  
+    const formData = new FormData();
     
-    setTimeout(() => {
-      const processedDocs = documents.map(doc => ({
-        ...doc,
-        status: 'completed' as const,
-        summary: language === 'en' 
-          ? `AI-generated summary for ${doc.name}. This ${doc.type} document has been processed using advanced AI algorithms, extracting key insights and relevant patterns. Key findings include: 1) Important trends in the data, 2) Critical insights for decision making, 3) Actionable recommendations based on analysis.`
-          : `Resumen generado por IA para ${doc.name}. Este documento ${doc.type === 'scientific' ? 'científico' : 'general'} ha sido procesado mediante algoritmos de IA avanzada, extrayendo insights clave y patrones relevantes. Hallazgos importantes incluyen: 1) Tendencias importantes en los datos, 2) Insights críticos para la toma de decisiones, 3) Recomendaciones accionables basadas en el análisis.`
-      }))
-
-      setAnalysisResult({
-        documents: processedDocs,
-        consolidatedPdf: 'documento-consolidado.pdf'
-      })
-      setIsAnalyzing(false)
-    }, 4000)
-  }
+    // Asumiendo que tienes acceso a los archivos originales
+    documents.forEach((doc, index) => {
+      // Necesitarás tener los File objects originales
+      // formData.append('files', originalFiles[index]);
+    });
+  
+    try {
+      const response = await fetch('/api/analyze-documents', {
+        method: 'POST',
+        body: formData,
+      });
+  
+      const result = await response.json();
+      
+      if (response.ok) {
+        // Polling para el estado del análisis
+        const pollInterval = setInterval(async () => {
+          const statusResponse = await fetch(`/api/analysis-status/${result.job_id}`);
+          const status = await statusResponse.json();
+          
+          // Actualizar UI con el progreso
+          if (status.status === 'completed') {
+            clearInterval(pollInterval);
+            setAnalysisResult({
+              documents: status.documents,
+              consolidatedPdf: `/api/download-report/${result.job_id}`
+            });
+            setIsAnalyzing(false);
+          } else if (status.status === 'error') {
+            clearInterval(pollInterval);
+            // Manejar error
+            setIsAnalyzing(false);
+          }
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('Error analyzing documents:', error);
+      setIsAnalyzing(false);
+    }
+  };
 
   const downloadConsolidatedPdf = () => {
     const link = document.createElement('a')
@@ -337,6 +432,8 @@ export default function DocumentAnalyzer() {
         return 'border-rose-200 bg-rose-50'
     }
   }
+
+  const isUploadDisabled = documents.length >= MAX_FILES
 
   const FeaturesModal = () => (
     <AnimatePresence>
@@ -524,20 +621,20 @@ export default function DocumentAnalyzer() {
           className="flex items-center justify-between mb-8 sm:mb-16"
         >
           <div className="flex items-center gap-3 sm:gap-4">
-            <motion.div
+            {/* <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: "spring" }}
               className="w-10 h-10 sm:w-12 sm:h-12 bg-white rounded-2xl shadow-lg shadow-blue-500/10 flex items-center justify-center flex-shrink-0"
             >
+            </motion.div> */}
               <Image 
                 src='/imagotipo-principal-sindescriptor.webp'
                 alt='DataKnow Logo'
-                width={90}
-                height={90}
-                className='object-cover w-6 h-6 sm:w-8 sm:h-8'
+                width={100}
+                height={100}
+                className='object-cover sm:w-8 sm:h-8'
               />
-            </motion.div>
             <div className="hidden sm:block">
               <h1 className="text-xl sm:text-2xl font-light text-slate-800">DataKnow</h1>
               <p className="text-xs sm:text-sm text-slate-500">
@@ -682,33 +779,51 @@ export default function DocumentAnalyzer() {
                 </p>
 
                 <motion.div
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  className={`relative border-2 border-dashed rounded-2xl p-4 sm:p-6 lg:p-8 text-center transition-all duration-300 cursor-pointer ${
-                    isDragging 
-                      ? 'border-blue-500 bg-blue-50/50' 
-                      : 'border-slate-300 hover:border-blue-400 bg-slate-50/50'
+                  whileHover={!isUploadDisabled ? { scale: 1.02 } : {}}
+                  whileTap={!isUploadDisabled ? { scale: 0.98 } : {}}
+                  className={`relative border-2 border-dashed rounded-2xl p-4 sm:p-6 lg:p-8 text-center transition-all duration-300 ${
+                    isUploadDisabled 
+                      ? 'border-slate-300 bg-slate-100 cursor-not-allowed' 
+                      : isDragging 
+                        ? 'border-blue-500 bg-blue-50/50 cursor-pointer' 
+                        : 'border-slate-300 hover:border-blue-400 bg-slate-50/50 cursor-pointer'
                   }`}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={!isUploadDisabled ? handleDragOver : undefined}
+                  onDragLeave={!isUploadDisabled ? handleDragLeave : undefined}
+                  onDrop={!isUploadDisabled ? handleDrop : undefined}
+                  onClick={!isUploadDisabled ? () => fileInputRef.current?.click() : undefined}
                 >
-                  <div className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6 shadow-lg shadow-blue-500/25">
-                    <Upload className="w-5 h-5 sm:w-6 sm:h-6 lg:w-8 lg:h-8 text-white" />
-                  </div>
-                  
-                  <h3 className="text-base sm:text-lg font-medium text-slate-800 mb-2">
-                    {t.upload.dropFiles}
-                  </h3>
-                  
-                  <p className="text-slate-500 text-xs sm:text-sm mb-3 sm:mb-4">
-                    {t.upload.orClick}
-                  </p>
+                  {isUploadDisabled ? (
+                    <div className="text-center">
+                      <div className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20 bg-slate-200 rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6 shadow-lg shadow-slate-500/10">
+                        <X className="w-5 h-5 sm:w-6 sm:h-6 lg:w-8 lg:h-8 text-slate-400" />
+                      </div>
+                      <h3 className="text-base sm:text-lg font-medium text-slate-800 mb-2">
+                        {t.upload.limitReached}
+                      </h3>
+                      <p className="text-slate-500 text-xs sm:text-sm mb-3 sm:mb-4">
+                        {t.upload.removeSome}
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6 shadow-lg shadow-blue-500/25">
+                        <Upload className="w-5 h-5 sm:w-6 sm:h-6 lg:w-8 lg:h-8 text-white" />
+                      </div>
+                      
+                      <h3 className="text-base sm:text-lg font-medium text-slate-800 mb-2">
+                        {t.upload.dropFiles}
+                      </h3>
+                      
+                      <p className="text-slate-500 text-xs sm:text-sm mb-3 sm:mb-4">
+                        {t.upload.orClick}
+                      </p>
 
-                  <div className="text-xs text-slate-400">
-                    {t.upload.maxFiles}
-                  </div>
+                      <div className="text-xs text-slate-400">
+                        {t.upload.maxFiles}
+                      </div>
+                    </>
+                  )}
 
                   <input
                     ref={fileInputRef}
@@ -716,9 +831,25 @@ export default function DocumentAnalyzer() {
                     multiple
                     accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv"
                     onChange={handleFileInput}
+                    disabled={isUploadDisabled}
                     className="hidden"
                   />
                 </motion.div>
+
+                {/* Error Message */}
+                <AnimatePresence>
+                  {uploadError && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      className="flex items-center gap-2 text-rose-600 bg-rose-50 border border-rose-200 rounded-xl p-3 mt-4"
+                    >
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      <span className="text-sm">{uploadError}</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* Quick Actions */}
@@ -812,76 +943,90 @@ export default function DocumentAnalyzer() {
                       </p>
                     </motion.div>
                   ) : (
-                    documents.map((doc, index) => (
-                      <motion.div
-                        key={doc.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.1 }}
-                        className={`bg-white rounded-2xl p-4 sm:p-6 shadow-sm border-2 transition-all duration-300 hover:shadow-md hover:border-blue-200 ${getStatusColor(doc.status)}`}
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-                          <div className="flex items-start sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
-                            <div className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/25 flex-shrink-0">
-                              <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                    <>
+                      {/* File Counter */}
+                      <div className="flex items-center justify-between px-2">
+                        <span className="text-sm text-slate-600">
+                          {documents.length} / {MAX_FILES} {language === 'en' ? 'files' : 'archivos'}
+                        </span>
+                        {documents.length >= MAX_FILES && (
+                          <span className="text-xs text-rose-600 bg-rose-50 px-2 py-1 rounded-full">
+                            {t.upload.limitReached}
+                          </span>
+                        )}
+                      </div>
+
+                      {documents.map((doc, index) => (
+                        <motion.div
+                          key={doc.id}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.1 }}
+                          className={`bg-white rounded-2xl p-4 sm:p-6 shadow-sm border-2 transition-all duration-300 hover:shadow-md hover:border-blue-200 ${getStatusColor(doc.status)}`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                            <div className="flex items-start sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                              <div className="w-8 h-8 sm:w-10 sm:h-10 lg:w-12 lg:h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/25 flex-shrink-0">
+                                <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                              </div>
+                              
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1 sm:mb-2">
+                                  <h3 className="font-medium text-slate-800 truncate text-sm sm:text-base">
+                                    {doc.name}
+                                  </h3>
+                                  <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize w-fit ${
+                                    doc.type === 'scientific' 
+                                      ? 'bg-purple-100 text-purple-700' 
+                                      : 'bg-blue-100 text-blue-700'
+                                  }`}>
+                                    {doc.type}
+                                  </span>
+                                </div>
+                                
+                                <div className="flex items-center gap-3 text-xs sm:text-sm text-slate-500">
+                                  <span>{doc.size}</span>
+                                  <span>•</span>
+                                  <span>{doc.uploadTime.toLocaleTimeString()}</span>
+                                </div>
+
+                                {/* Progress Bar */}
+                                {doc.status === 'uploading' && doc.progress && (
+                                  <div className="mt-2 sm:mt-3">
+                                    <div className="w-full bg-slate-200 rounded-full h-1.5 sm:h-2">
+                                      <motion.div
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${doc.progress}%` }}
+                                        className="bg-blue-500 h-1.5 sm:h-2 rounded-full"
+                                      />
+                                    </div>
+                                    <div className="text-xs text-slate-500 mt-1">
+                                      {language === 'en' ? 'Uploading...' : 'Subiendo...'} {doc.progress}%
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                            
-                            <div className="flex-1 min-w-0">
-                              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1 sm:mb-2">
-                                <h3 className="font-medium text-slate-800 truncate text-sm sm:text-base">
-                                  {doc.name}
-                                </h3>
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize w-fit ${
-                                  doc.type === 'scientific' 
-                                    ? 'bg-purple-100 text-purple-700' 
-                                    : 'bg-blue-100 text-blue-700'
-                                }`}>
-                                  {doc.type}
+
+                            <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-4">
+                              <div className="flex items-center gap-1 sm:gap-2">
+                                {getStatusIcon(doc.status)}
+                                <span className="text-xs sm:text-sm font-medium capitalize text-slate-700">
+                                  {t.status[doc.status]}
                                 </span>
                               </div>
                               
-                              <div className="flex items-center gap-3 text-xs sm:text-sm text-slate-500">
-                                <span>{doc.size}</span>
-                                <span>•</span>
-                                <span>{doc.uploadTime.toLocaleTimeString()}</span>
-                              </div>
-
-                              {/* Progress Bar */}
-                              {doc.status === 'uploading' && doc.progress && (
-                                <div className="mt-2 sm:mt-3">
-                                  <div className="w-full bg-slate-200 rounded-full h-1.5 sm:h-2">
-                                    <motion.div
-                                      initial={{ width: 0 }}
-                                      animate={{ width: `${doc.progress}%` }}
-                                      className="bg-blue-500 h-1.5 sm:h-2 rounded-full"
-                                    />
-                                  </div>
-                                  <div className="text-xs text-slate-500 mt-1">
-                                    {language === 'en' ? 'Uploading...' : 'Subiendo...'} {doc.progress}%
-                                  </div>
-                                </div>
-                              )}
+                              <button
+                                onClick={() => removeDocument(doc.id)}
+                                className="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 flex items-center justify-center text-slate-400 hover:text-rose-500 transition-colors rounded-xl hover:bg-rose-50 flex-shrink-0"
+                              >
+                                <X className="w-3 h-3 sm:w-4 sm:h-4" />
+                              </button>
                             </div>
                           </div>
-
-                          <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-4">
-                            <div className="flex items-center gap-1 sm:gap-2">
-                              {getStatusIcon(doc.status)}
-                              <span className="text-xs sm:text-sm font-medium capitalize text-slate-700">
-                                {t.status[doc.status]}
-                              </span>
-                            </div>
-                            
-                            <button
-                              onClick={() => removeDocument(doc.id)}
-                              className="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 flex items-center justify-center text-slate-400 hover:text-rose-500 transition-colors rounded-xl hover:bg-rose-50 flex-shrink-0"
-                            >
-                              <X className="w-3 h-3 sm:w-4 sm:h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))
+                        </motion.div>
+                      ))}
+                    </>
                   )}
                 </motion.div>
               )}
