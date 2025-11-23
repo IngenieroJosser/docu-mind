@@ -21,7 +21,12 @@ import {
   Play,
   BookOpen,
   Menu,
-  Home
+  Home,
+  Copy,
+  CheckCheck,
+  Edit3,
+  Brain,
+  Send
 } from 'lucide-react'
 import Image from 'next/image'
 
@@ -60,7 +65,11 @@ const translations = {
       startAnalysis: "Start Analysis",
       search: "Search",
       filter: "Filter",
-      download: "Download PDF"
+      download: "Download PDF",
+      copy: "Copy",
+      copied: "Copied!",
+      generatePdf: "Generate PDF with AI",
+      customAnalysis: "Custom Analysis"
     },
     tabs: {
       documents: "Documents",
@@ -77,7 +86,11 @@ const translations = {
       description: "All documents processed successfully with AI-powered insights",
       consolidated: "Consolidated Report",
       consolidatedDesc: "Complete analysis summary in PDF format",
-      summaries: "Document Summaries"
+      summaries: "Document Summaries",
+      customPrompt: "Custom Analysis Prompt",
+      customPlaceholder: "Tell the AI what specific insights you want from these documents...",
+      generating: "Generating PDF with AI...",
+      aiThinking: "AI is analyzing your request..."
     },
     features: {
       multiFormat: "Multi-Format Support",
@@ -111,7 +124,11 @@ const translations = {
       startAnalysis: "Iniciar Análisis",
       search: "Buscar",
       filter: "Filtrar",
-      download: "Descargar PDF"
+      download: "Descargar PDF",
+      copy: "Copiar",
+      copied: "¡Copiado!",
+      generatePdf: "Generar PDF con IA",
+      customAnalysis: "Análisis Personalizado"
     },
     tabs: {
       documents: "Documentos",
@@ -128,7 +145,11 @@ const translations = {
       description: "Todos los documentos procesados exitosamente con análisis de IA",
       consolidated: "Reporte Consolidado",
       consolidatedDesc: "Resumen completo del análisis en formato PDF",
-      summaries: "Resúmenes de Documentos"
+      summaries: "Resúmenes de Documentos",
+      customPrompt: "Prompt de Análisis Personalizado",
+      customPlaceholder: "Dile a la IA qué insights específicos quieres de estos documentos...",
+      generating: "Generando PDF con IA...",
+      aiThinking: "La IA está analizando tu solicitud..."
     },
     features: {
       multiFormat: "Soporte Multi-Formato",
@@ -153,10 +174,14 @@ export default function DocumentAnalyzer() {
   const [isDragging, setIsDragging] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
   const [activeTab, setActiveTab] = useState<'upload' | 'analysis'>('upload')
   const [language, setLanguage] = useState<Language>('en')
   const [showFeaturesModal, setShowFeaturesModal] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [copiedTextId, setCopiedTextId] = useState<string | null>(null)
+  const [customPrompt, setCustomPrompt] = useState('')
+  const [showCustomPrompt, setShowCustomPrompt] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const t = translations[language]
@@ -234,8 +259,8 @@ export default function DocumentAnalyzer() {
         ...doc,
         status: 'completed' as const,
         summary: language === 'en' 
-          ? `AI-generated summary for ${doc.name}. This ${doc.type} document has been processed using advanced AI algorithms, extracting key insights and relevant patterns.`
-          : `Resumen generado por IA para ${doc.name}. Este documento ${doc.type === 'scientific' ? 'científico' : 'general'} ha sido procesado mediante algoritmos de IA avanzada, extrayendo insights clave y patrones relevantes.`
+          ? `AI-generated summary for ${doc.name}. This ${doc.type} document has been processed using advanced AI algorithms, extracting key insights and relevant patterns. Key findings include: 1) Important trends in the data, 2) Critical insights for decision making, 3) Actionable recommendations based on analysis.`
+          : `Resumen generado por IA para ${doc.name}. Este documento ${doc.type === 'scientific' ? 'científico' : 'general'} ha sido procesado mediante algoritmos de IA avanzada, extrayendo insights clave y patrones relevantes. Hallazgos importantes incluyen: 1) Tendencias importantes en los datos, 2) Insights críticos para la toma de decisiones, 3) Recomendaciones accionables basadas en el análisis.`
       }))
 
       setAnalysisResult({
@@ -251,6 +276,40 @@ export default function DocumentAnalyzer() {
     link.href = '#'
     link.download = 'documento-consolidado.pdf'
     link.click()
+  }
+
+  const generateCustomPdf = async () => {
+    if (!customPrompt.trim()) return
+    
+    setIsGeneratingPdf(true)
+    
+    // Simular generación de PDF con IA
+    setTimeout(() => {
+      const fileName = `custom-analysis-${new Date().getTime()}.pdf`
+      const link = document.createElement('a')
+      link.href = '#'
+      link.download = fileName
+      link.click()
+      setIsGeneratingPdf(false)
+      setShowCustomPrompt(false)
+      setCustomPrompt('')
+      
+      // Mostrar mensaje de éxito
+      alert(language === 'en' 
+        ? 'PDF generated successfully with your custom analysis!'
+        : '¡PDF generado exitosamente con tu análisis personalizado!'
+      )
+    }, 3000)
+  }
+
+  const copyToClipboard = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedTextId(id)
+      setTimeout(() => setCopiedTextId(null), 2000)
+    } catch (err) {
+      console.error('Failed to copy text: ', err)
+    }
   }
 
   const getStatusIcon = (status: Document['status']) => {
@@ -874,14 +933,14 @@ export default function DocumentAnalyzer() {
                         </div>
                       </motion.div>
 
-                      {/* Consolidated PDF */}
+                      {/* Consolidated PDF Section */}
                       <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.2 }}
                         className="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200"
                       >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
                           <div className="flex-1">
                             <h3 className="text-lg sm:text-xl font-medium text-slate-800 mb-1 sm:mb-2">
                               {t.analysis.consolidated}
@@ -890,14 +949,82 @@ export default function DocumentAnalyzer() {
                               {t.analysis.consolidatedDesc}
                             </p>
                           </div>
-                          <button
-                            onClick={downloadConsolidatedPdf}
-                            className="flex items-center gap-2 sm:gap-3 bg-slate-800 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl hover:bg-slate-700 transition-all duration-300 font-medium group flex-shrink-0"
-                          >
-                            <Download className="w-4 h-4 sm:w-5 sm:h-5" />
-                            <span className="text-sm sm:text-base">{t.actions.download}</span>
-                          </button>
+                          <div className="flex gap-2 sm:gap-3">
+                            <button
+                              onClick={downloadConsolidatedPdf}
+                              className="flex items-center gap-2 sm:gap-3 bg-slate-800 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl hover:bg-slate-700 transition-all duration-300 font-medium group flex-shrink-0"
+                            >
+                              <Download className="w-4 h-4 sm:w-5 sm:h-5" />
+                              <span className="text-sm sm:text-base">{t.actions.download}</span>
+                            </button>
+                            <button
+                              onClick={() => setShowCustomPrompt(!showCustomPrompt)}
+                              className="flex items-center gap-2 sm:gap-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-xl hover:shadow-lg hover:shadow-blue-500/25 transition-all duration-300 font-medium group flex-shrink-0"
+                            >
+                              <Brain className="w-4 h-4 sm:w-5 sm:h-5" />
+                              <span className="text-sm sm:text-base">{t.actions.customAnalysis}</span>
+                            </button>
+                          </div>
                         </div>
+
+                        {/* Custom Prompt Input */}
+                        <AnimatePresence>
+                          {showCustomPrompt && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="pt-4 border-t border-slate-200">
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                  {t.analysis.customPrompt}
+                                </label>
+                                <div className="flex flex-col sm:flex-row gap-3">
+                                  <textarea
+                                    value={customPrompt}
+                                    onChange={(e) => setCustomPrompt(e.target.value)}
+                                    placeholder={t.analysis.customPlaceholder}
+                                    className="flex-1 px-4 py-3 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 resize-none min-h-[100px] text-sm"
+                                    rows={3}
+                                  />
+                                  <button
+                                    onClick={generateCustomPdf}
+                                    disabled={!customPrompt.trim() || isGeneratingPdf}
+                                    className="flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-xl hover:shadow-lg hover:shadow-green-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 font-medium group flex-shrink-0 h-fit"
+                                  >
+                                    {isGeneratingPdf ? (
+                                      <>
+                                        <motion.div
+                                          animate={{ rotate: 360 }}
+                                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                                        >
+                                          <Brain className="w-4 h-4 sm:w-5 sm:h-5" />
+                                        </motion.div>
+                                        <span className="text-sm sm:text-base">{t.analysis.generating}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+                                        <span className="text-sm sm:text-base">{t.actions.generatePdf}</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                                {isGeneratingPdf && (
+                                  <motion.p
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    className="text-sm text-slate-500 mt-2 flex items-center gap-2"
+                                  >
+                                    <Zap className="w-4 h-4 text-purple-500 animate-pulse" />
+                                    {t.analysis.aiThinking}
+                                  </motion.p>
+                                )}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </motion.div>
 
                       {/* Individual Summaries */}
@@ -912,9 +1039,9 @@ export default function DocumentAnalyzer() {
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.3 + index * 0.1 }}
-                            className="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200 hover:shadow-md transition-all duration-300"
+                            className="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200 hover:shadow-md transition-all duration-300 group"
                           >
-                            <div className="flex items-start gap-3 sm:gap-4">
+                            <div className="flex items-start gap-3 sm:gap-4 mb-3 sm:mb-4">
                               <div className={`w-2 h-2 sm:w-3 sm:h-3 rounded-full mt-2 ${
                                 doc.type === 'scientific' ? 'bg-purple-500' : 'bg-blue-500'
                               }`} />
@@ -932,9 +1059,27 @@ export default function DocumentAnalyzer() {
                                   </span>
                                 </div>
                                 
-                                <p className="text-slate-600 leading-relaxed text-sm sm:text-base">
+                                <p className="text-slate-600 leading-relaxed text-sm sm:text-base mb-3">
                                   {doc.summary}
                                 </p>
+
+                                {/* Copy Button */}
+                                <button
+                                  onClick={() => doc.summary && copyToClipboard(doc.summary, doc.id)}
+                                  className="flex items-center gap-2 text-xs text-slate-500 hover:text-blue-600 transition-colors group/copy"
+                                >
+                                  {copiedTextId === doc.id ? (
+                                    <>
+                                      <CheckCheck className="w-3 h-3 sm:w-4 sm:h-4 text-green-500" />
+                                      <span>{t.actions.copied}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3 h-3 sm:w-4 sm:h-4" />
+                                      <span>{t.actions.copy}</span>
+                                    </>
+                                  )}
+                                </button>
                               </div>
                             </div>
                           </motion.div>
