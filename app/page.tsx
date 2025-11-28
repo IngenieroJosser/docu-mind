@@ -440,38 +440,44 @@ export default function DocumentAnalyzer() {
     
     if (!analysisResult?.consolidatedPdf) {
       console.error('❌ No PDF URL available');
-      setAnalysisError('No PDF available for download');
+      setAnalysisError('No document available for download');
       return;
     }
   
     try {
-      const pdfUrl = analysisResult.consolidatedPdf;
-      console.log('📥 Downloading PDF from:', pdfUrl);
+      const downloadUrl = analysisResult.consolidatedPdf;
+      console.log('📥 Downloading document from:', downloadUrl);
       
-      // Método más simple y confiable - usar link directo
+      // Método simple - usar link directo
       const link = document.createElement('a');
-      link.href = pdfUrl;
-      link.download = 'documento-consolidado.pdf';
-      link.target = '_blank'; // Abrir en nueva pestaña como fallback
+      link.href = downloadUrl;
+      
+      // Detectar si es PDF o HTML
+      if (downloadUrl.includes('.pdf')) {
+        link.download = 'documento-consolidado.pdf';
+      } else {
+        link.download = 'documento-consolidado.html';
+        link.target = '_blank'; // Abrir HTML en nueva pestaña
+      }
       
       // Agregar al DOM, hacer click y remover
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       
-      console.log('✅ PDF download initiated');
+      console.log('✅ Download initiated');
       
       // Mostrar mensaje de éxito
       setTimeout(() => {
         if (language === 'en') {
-          alert('PDF download started successfully!');
+          alert('Document download started successfully!');
         } else {
-          alert('¡Descarga de PDF iniciada exitosamente!');
+          alert('¡Descarga de documento iniciada exitosamente!');
         }
       }, 1000);
       
     } catch (error: any) {
-      console.error('❌ Error downloading PDF:', error);
+      console.error('❌ Error downloading document:', error);
       
       // Método alternativo: abrir en nueva pestaña
       if (analysisResult?.consolidatedPdf) {
@@ -479,8 +485,8 @@ export default function DocumentAnalyzer() {
         window.open(analysisResult.consolidatedPdf, '_blank');
       } else {
         const errorMsg = language === 'en' 
-          ? 'Error downloading PDF. Please try again.'
-          : 'Error descargando PDF. Por favor intenta de nuevo.';
+          ? 'Error downloading document. Please try again.'
+          : 'Error descargando documento. Por favor intenta de nuevo.';
         setAnalysisError(errorMsg);
       }
     }
