@@ -193,7 +193,7 @@ const translations = {
 const MAX_FILES = 10
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB en bytes
 const SUPPORTED_FORMATS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.csv']
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://dbc-aee86f72-78f6.cloud.databricks.com'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export default function DocumentAnalyzer() {
   const [documents, setDocuments] = useState<Document[]>([])
@@ -383,7 +383,7 @@ export default function DocumentAnalyzer() {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
     }
-
+  
     pollingRef.current = setInterval(async () => {
       try {
         const statusResponse = await fetch(`${API_BASE_URL}/api/analysis-status/${jobId}`);
@@ -391,7 +391,7 @@ export default function DocumentAnalyzer() {
         if (!statusResponse.ok) {
           throw new Error('Failed to fetch status');
         }
-
+  
         const status = await statusResponse.json();
         
         if (status.status === 'completed') {
@@ -404,10 +404,15 @@ export default function DocumentAnalyzer() {
             const processedDoc = status.documents.find((d: any) => d.name === doc.name);
             return processedDoc ? { ...doc, ...processedDoc } : doc;
           });
-
+  
+          // CORRECIÓN: Verificar que consolidated_pdf existe y construir URL correctamente
+          const pdfUrl = status.consolidated_pdf 
+            ? `${API_BASE_URL}${status.consolidated_pdf}`
+            : undefined;
+  
           setAnalysisResult({
             documents: updatedDocuments,
-            consolidatedPdf: `${API_BASE_URL}${status.consolidatedPdf}`,
+            consolidatedPdf: pdfUrl,
             jobId: jobId
           });
           setIsAnalyzing(false);
@@ -418,7 +423,6 @@ export default function DocumentAnalyzer() {
           setAnalysisError(status.error || t.errors.analysisFailed);
           setIsAnalyzing(false);
         }
-        // Si sigue en processing, continuamos el polling
       } catch (error) {
         console.error('Error polling status:', error);
         if (pollingRef.current) {
@@ -431,24 +435,54 @@ export default function DocumentAnalyzer() {
   };
 
   const downloadConsolidatedPdf = async () => {
-    if (!analysisResult?.consolidatedPdf) return;
-
+    console.log('🔍 Debug: analysisResult', analysisResult);
+    console.log('🔍 Debug: consolidatedPdf URL', analysisResult?.consolidatedPdf);
+    
+    if (!analysisResult?.consolidatedPdf) {
+      console.error('❌ No PDF URL available');
+      setAnalysisError('No PDF available for download');
+      return;
+    }
+  
     try {
-      const response = await fetch(analysisResult.consolidatedPdf);
-      if (!response.ok) throw new Error('Failed to download PDF');
+      const pdfUrl = analysisResult.consolidatedPdf;
+      console.log('📥 Downloading PDF from:', pdfUrl);
       
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+      // Método más simple y confiable - usar link directo
       const link = document.createElement('a');
-      link.href = url;
+      link.href = pdfUrl;
       link.download = 'documento-consolidado.pdf';
+      link.target = '_blank'; // Abrir en nueva pestaña como fallback
+      
+      // Agregar al DOM, hacer click y remover
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error downloading PDF:', error);
-      setAnalysisError(t.errors.connectionError);
+      
+      console.log('✅ PDF download initiated');
+      
+      // Mostrar mensaje de éxito
+      setTimeout(() => {
+        if (language === 'en') {
+          alert('PDF download started successfully!');
+        } else {
+          alert('¡Descarga de PDF iniciada exitosamente!');
+        }
+      }, 1000);
+      
+    } catch (error: any) {
+      console.error('❌ Error downloading PDF:', error);
+      
+      // Método alternativo: abrir en nueva pestaña
+      if (analysisResult?.consolidatedPdf) {
+        console.log('🔄 Trying alternative download method...');
+        window.open(analysisResult.consolidatedPdf, '_blank');
+      } else {
+        const errorMsg = language === 'en' 
+          ? 'Error downloading PDF. Please try again.'
+          : 'Error descargando PDF. Por favor intenta de nuevo.';
+        setAnalysisError(errorMsg);
+      }
     }
   }
 
