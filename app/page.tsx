@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Upload, 
@@ -39,11 +39,13 @@ type Document = {
   uploadTime: Date
   size?: string
   progress?: number
+  originalFile?: File
 }
 
 type AnalysisResult = {
   documents: Document[]
   consolidatedPdf?: string
+  jobId?: string
 }
 
 type Language = 'en' | 'es'
@@ -112,7 +114,9 @@ const translations = {
     errors: {
       fileLimit: "Cannot upload more than 10 files",
       fileTooLarge: "File is too large (max 100MB)",
-      invalidFormat: "File format not supported"
+      invalidFormat: "File format not supported",
+      analysisFailed: "Analysis failed. Please try again.",
+      connectionError: "Connection error. Please check your network."
     }
   },
   es: {
@@ -178,7 +182,9 @@ const translations = {
     errors: {
       fileLimit: "No se pueden subir más de 10 archivos",
       fileTooLarge: "El archivo es demasiado grande (máx. 100MB)",
-      invalidFormat: "Formato de archivo no soportado"
+      invalidFormat: "Formato de archivo no soportado",
+      analysisFailed: "El análisis falló. Por favor intenta de nuevo.",
+      connectionError: "Error de conexión. Por favor verifica tu red."
     }
   }
 }
@@ -187,6 +193,7 @@ const translations = {
 const MAX_FILES = 10
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB en bytes
 const SUPPORTED_FORMATS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.csv']
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://a1b2c3d4-ef56-7890.ngrok.io'
 
 export default function DocumentAnalyzer() {
   const [documents, setDocuments] = useState<Document[]>([])
@@ -202,9 +209,20 @@ export default function DocumentAnalyzer() {
   const [customPrompt, setCustomPrompt] = useState('')
   const [showCustomPrompt, setShowCustomPrompt] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const pollingRef = useRef<NodeJS.Timeout | null>(null)
 
   const t = translations[language]
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current)
+      }
+    }
+  }, [])
 
   // Función para validar archivos
   const validateFiles = (files: File[]): { valid: File[], errors: string[] } => {
@@ -279,15 +297,20 @@ export default function DocumentAnalyzer() {
     const newDocuments: Document[] = validFiles.map(file => ({
       id: Math.random().toString(36).substr(2, 9),
       name: file.name,
-      type: file.name.toLowerCase().includes('research') || file.name.toLowerCase().includes('study') ? 'scientific' : 'general',
+      type: file.name.toLowerCase().includes('research') || 
+            file.name.toLowerCase().includes('study') || 
+            file.name.toLowerCase().includes('paper') ||
+            file.name.toLowerCase().includes('thesis') ? 'scientific' : 'general',
       status: 'uploading',
       uploadTime: new Date(),
       size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-      progress: 0
+      progress: 0,
+      originalFile: file
     }))
 
     setDocuments(prev => [...prev, ...newDocuments])
     setUploadError(null)
+    setAnalysisError(null)
 
     // Simular progreso de upload con animación
     newDocuments.forEach((doc, index) => {
@@ -297,18 +320,13 @@ export default function DocumentAnalyzer() {
             ? { 
                 ...d, 
                 progress: d.progress! + 10,
-                status: d.progress! >= 90 ? 'processing' : 'uploading'
+                status: d.progress! >= 90 ? 'completed' : 'uploading'
               }
             : d
         ))
         
         if (documents.find(d => d.id === doc.id)?.progress! >= 90) {
           clearInterval(interval)
-          setTimeout(() => {
-            setDocuments(prev => prev.map(d => 
-              d.id === doc.id ? { ...d, status: 'completed' } : d
-            ))
-          }, 500)
         }
       }, 100 + index * 50)
     })
@@ -317,84 +335,168 @@ export default function DocumentAnalyzer() {
   const removeDocument = (id: string) => {
     setDocuments(prev => prev.filter(doc => doc.id !== id))
     setUploadError(null)
+    setAnalysisError(null)
   }
 
   const analyzeDocuments = async () => {
+    if (documents.length === 0) return
+    
     setIsAnalyzing(true);
+    setAnalysisError(null);
     setActiveTab('analysis');
-  
+
     const formData = new FormData();
     
-    // Asumiendo que tienes acceso a los archivos originales
-    documents.forEach((doc, index) => {
-      // Necesitarás tener los File objects originales
-      // formData.append('files', originalFiles[index]);
+    // Agregar archivos al FormData
+    documents.forEach((doc) => {
+      if (doc.originalFile) {
+        formData.append('files', doc.originalFile);
+      }
     });
-  
+
     try {
-      const response = await fetch('/api/analyze-documents', {
+      const response = await fetch(`${API_BASE_URL}/api/analyze-documents`, {
         method: 'POST',
         body: formData,
       });
-  
+
+      if (!response.ok) {
+        throw new Error(t.errors.connectionError);
+      }
+
       const result = await response.json();
       
-      if (response.ok) {
-        // Polling para el estado del análisis
-        const pollInterval = setInterval(async () => {
-          const statusResponse = await fetch(`/api/analysis-status/${result.job_id}`);
-          const status = await statusResponse.json();
-          
-          // Actualizar UI con el progreso
-          if (status.status === 'completed') {
-            clearInterval(pollInterval);
-            setAnalysisResult({
-              documents: status.documents,
-              consolidatedPdf: `/api/download-report/${result.job_id}`
-            });
-            setIsAnalyzing(false);
-          } else if (status.status === 'error') {
-            clearInterval(pollInterval);
-            // Manejar error
-            setIsAnalyzing(false);
-          }
-        }, 2000);
+      if (result.job_id) {
+        // Iniciar polling para el estado del análisis
+        startPolling(result.job_id);
+      } else {
+        throw new Error(t.errors.analysisFailed);
       }
     } catch (error) {
       console.error('Error analyzing documents:', error);
+      setAnalysisError(t.errors.connectionError);
       setIsAnalyzing(false);
     }
   };
 
-  const downloadConsolidatedPdf = () => {
-    const link = document.createElement('a')
-    link.href = '#'
-    link.download = 'documento-consolidado.pdf'
-    link.click()
+  const startPolling = (jobId: string) => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+    }
+
+    pollingRef.current = setInterval(async () => {
+      try {
+        const statusResponse = await fetch(`${API_BASE_URL}/api/analysis-status/${jobId}`);
+        
+        if (!statusResponse.ok) {
+          throw new Error('Failed to fetch status');
+        }
+
+        const status = await statusResponse.json();
+        
+        if (status.status === 'completed') {
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+          }
+          
+          // Actualizar documentos con los resultados
+          const updatedDocuments = documents.map(doc => {
+            const processedDoc = status.documents.find((d: any) => d.name === doc.name);
+            return processedDoc ? { ...doc, ...processedDoc } : doc;
+          });
+
+          setAnalysisResult({
+            documents: updatedDocuments,
+            consolidatedPdf: `${API_BASE_URL}${status.consolidatedPdf}`,
+            jobId: jobId
+          });
+          setIsAnalyzing(false);
+        } else if (status.status === 'error') {
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+          }
+          setAnalysisError(status.error || t.errors.analysisFailed);
+          setIsAnalyzing(false);
+        }
+        // Si sigue en processing, continuamos el polling
+      } catch (error) {
+        console.error('Error polling status:', error);
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+        }
+        setAnalysisError(t.errors.connectionError);
+        setIsAnalyzing(false);
+      }
+    }, 2000);
+  };
+
+  const downloadConsolidatedPdf = async () => {
+    if (!analysisResult?.consolidatedPdf) return;
+
+    try {
+      const response = await fetch(analysisResult.consolidatedPdf);
+      if (!response.ok) throw new Error('Failed to download PDF');
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'documento-consolidado.pdf';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading PDF:', error);
+      setAnalysisError(t.errors.connectionError);
+    }
   }
 
   const generateCustomPdf = async () => {
-    if (!customPrompt.trim()) return
+    if (!customPrompt.trim() || !analysisResult?.jobId) return
     
     setIsGeneratingPdf(true)
     
-    // Simular generación de PDF con IA
-    setTimeout(() => {
-      const fileName = `custom-analysis-${new Date().getTime()}.pdf`
-      const link = document.createElement('a')
-      link.href = '#'
-      link.download = fileName
-      link.click()
-      setIsGeneratingPdf(false)
-      setShowCustomPrompt(false)
-      setCustomPrompt('')
-      
-      // Mostrar mensaje de éxito
-      alert(language === 'en' 
-        ? 'PDF generated successfully with your custom analysis!'
-        : '¡PDF generado exitosamente con tu análisis personalizado!'
-      )
-    }, 3000)
+    try {
+      // Enviar prompt personalizado al backend
+      const response = await fetch(`${API_BASE_URL}/api/custom-analysis`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          job_id: analysisResult.jobId,
+          custom_prompt: customPrompt
+        }),
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `custom-analysis-${new Date().getTime()}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        // Mostrar mensaje de éxito
+        alert(language === 'en' 
+          ? 'PDF generated successfully with your custom analysis!'
+          : '¡PDF generado exitosamente con tu análisis personalizado!'
+        )
+      } else {
+        throw new Error('Failed to generate custom PDF');
+      }
+    } catch (error) {
+      console.error('Error generating custom PDF:', error);
+      setAnalysisError(t.errors.connectionError);
+    } finally {
+      setIsGeneratingPdf(false);
+      setShowCustomPrompt(false);
+      setCustomPrompt('');
+    }
   }
 
   const copyToClipboard = async (text: string, id: string) => {
@@ -417,6 +519,8 @@ export default function DocumentAnalyzer() {
         return <Check className="w-4 h-4 text-emerald-500" />
       case 'error':
         return <AlertCircle className="w-4 h-4 text-rose-500" />
+      default:
+        return <Clock className="w-4 h-4 text-blue-400" />
     }
   }
 
@@ -430,6 +534,8 @@ export default function DocumentAnalyzer() {
         return 'border-emerald-200 bg-emerald-50'
       case 'error':
         return 'border-rose-200 bg-rose-50'
+      default:
+        return 'border-slate-200 bg-slate-50'
     }
   }
 
@@ -621,22 +727,11 @@ export default function DocumentAnalyzer() {
           className="flex items-center justify-between mb-8 sm:mb-16"
         >
           <div className="flex items-center gap-3 sm:gap-4">
-            {/* <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ delay: 0.2, type: "spring" }}
-              className="w-10 h-10 sm:w-12 sm:h-12 bg-white rounded-2xl shadow-lg shadow-blue-500/10 flex items-center justify-center flex-shrink-0"
-            >
-            </motion.div> */}
-              <Image 
-                src='/imagotipo-principal-sindescriptor.webp'
-                alt='DataKnow Logo'
-                width={100}
-                height={100}
-                className='object-cover sm:w-8 sm:h-8'
-              />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/25">
+              <Brain className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+            </div>
             <div className="hidden sm:block">
-              <h1 className="text-xl sm:text-2xl font-light text-slate-800">DataKnow</h1>
+              <h1 className="text-xl sm:text-2xl font-light text-slate-800">DocuMind AI</h1>
               <p className="text-xs sm:text-sm text-slate-500">
                 {language === 'en' ? 'Intelligent Document Analysis' : 'Análisis Inteligente de Documentos'}
               </p>
@@ -760,6 +855,27 @@ export default function DocumentAnalyzer() {
             ))}
           </div>
         </motion.div>
+
+        {/* Error Message Global */}
+        <AnimatePresence>
+          {analysisError && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="flex items-center gap-2 text-rose-600 bg-rose-50 border border-rose-200 rounded-xl p-4 mb-6 mx-auto max-w-4xl"
+            >
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span className="text-sm">{analysisError}</span>
+              <button
+                onClick={() => setAnalysisError(null)}
+                className="ml-auto text-rose-400 hover:text-rose-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Main Content - Responsive Grid */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 sm:gap-8">
@@ -1039,7 +1155,23 @@ export default function DocumentAnalyzer() {
                   exit={{ opacity: 0, y: -20 }}
                   className="space-y-4 sm:space-y-6"
                 >
-                  {!analysisResult ? (
+                  {!analysisResult && !isAnalyzing ? (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-center py-8 sm:py-16"
+                    >
+                      <div className="w-16 h-16 sm:w-20 sm:h-20 lg:w-24 lg:h-24 bg-slate-100 rounded-3xl flex items-center justify-center mx-auto mb-4 sm:mb-6">
+                        <BarChart3 className="w-8 h-8 sm:w-10 sm:h-10 text-slate-400" />
+                      </div>
+                      <h3 className="text-base sm:text-lg font-medium text-slate-600 mb-2">
+                        {t.empty.noResults}
+                      </h3>
+                      <p className="text-slate-500 text-xs sm:text-sm">
+                        {t.empty.uploadFirst}
+                      </p>
+                    </motion.div>
+                  ) : isAnalyzing ? (
                     <motion.div
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -1053,10 +1185,10 @@ export default function DocumentAnalyzer() {
                         <BarChart3 className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
                       </motion.div>
                       <h3 className="text-base sm:text-lg font-medium text-slate-600 mb-2">
-                        {isAnalyzing ? t.empty.analyzing : t.empty.noResults}
+                        {t.empty.analyzing}
                       </h3>
                       <p className="text-slate-500 text-xs sm:text-sm">
-                        {isAnalyzing ? t.empty.aiProcessing : t.empty.uploadFirst}
+                        {t.empty.aiProcessing}
                       </p>
                     </motion.div>
                   ) : (
@@ -1178,7 +1310,7 @@ export default function DocumentAnalyzer() {
                           {t.analysis.summaries}
                         </h3>
                         
-                        {analysisResult.documents.map((doc, index) => (
+                        {analysisResult && analysisResult.documents.map((doc, index) => (
                           <motion.div
                             key={doc.id}
                             initial={{ opacity: 0, y: 20 }}
