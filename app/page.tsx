@@ -193,7 +193,7 @@ const translations = {
 const MAX_FILES = 10
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB en bytes
 const SUPPORTED_FORMATS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.csv']
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://a1b2c3d4-ef56-7890.ngrok.io'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://dbc-aee86f72-78f6.cloud.databricks.com'
 
 export default function DocumentAnalyzer() {
   const [documents, setDocuments] = useState<Document[]>([])
