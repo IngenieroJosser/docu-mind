@@ -434,7 +434,7 @@ export default function DocumentAnalyzer() {
     }, 2000);
   };
 
-  const downloadConsolidatedPdf = async () => {
+  const downloadConsolidatedPdf = () => {
     console.log('🔍 Debug: analysisResult', analysisResult);
     console.log('🔍 Debug: consolidatedPdf URL', analysisResult?.consolidatedPdf);
     
